@@ -5,6 +5,7 @@ import urllib
 import urllib.request
 import re
 from pathlib import Path
+import os.path
 import argparse
 import urltools as ut
 
@@ -56,6 +57,7 @@ def _main(args):
     for line in shoppinglist_file:
         lines += 1
         line = line.strip()
+        line = line.strip('\n')
 
         if line[0] == 'n' and line[1:2].isnumeric():
             # We have a wordnet ID
@@ -66,7 +68,7 @@ def _main(args):
             ss = wn.synset_from_pos_and_offset(pos, offset)
             synsetdict[offset] = ss
 
-        elif line[0:3].isalpha:
+        elif line[0:2].isalpha:
             # We have a synset name
 
             ss = wn.synset(line)
@@ -79,11 +81,19 @@ def _main(args):
 
     print('Processing URLs from the following shopping list', synsetdict)
 
+    # Make sure we have a directory for every synset, these may alreadys exist or not
+    for offset in synsetdict:
+        ssstr = str(synsetdict[offset])[8:-2]
+        path = args.image_dir + ssstr
+        if not os.path.exists(path):
+            os.makedirs(path)
+
     # read the URL list file end to end and process only those lines that
     # match synsets in our shopping list
     lines_read       = 0
     files_downloaded = 0
     files_existing   = 0
+    dup_count        = 0
     urldict = {}
     urllist_file = open(args.url_file, 'r',   encoding="latin-1")
     for line in urllist_file:
@@ -118,7 +128,7 @@ def _main(args):
             continue
 
         # create the file name
-        jpg_filename = args.image_dir + ssstr + '-' + serial + '.jpg'
+        jpg_filename = args.image_dir + ssstr + '/' + ssstr + '-' + serial + '.jpg'
 
         # If we already have this file, we don't need to get it
         if Path(jpg_filename).is_file():
@@ -138,6 +148,8 @@ def _main(args):
 
         except urllib.error.URLError as e:
             print(e.reason, wnid, ssstr, ' at line', lines_read)
+        except:
+            print('unknown error at line', lines_read)
 
     print('downloaded', files_downloaded,
           'skipped', files_existing, 'existing files',
@@ -183,8 +195,8 @@ if __name__ == '__main__':
         args_ok = False
         print('ERROR SHOPPING_FILE', args.shopping_file, 'not found')
 
-    if args.image_dir[:-1] /= '/':
-        args.image_dir.append('/')
+    if args.image_dir[:-1] != '/':
+        args.image_dir += '/'
 
     if not Path(args.image_dir).is_dir():
         args_ok = False
