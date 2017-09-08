@@ -1,14 +1,14 @@
 ImageNet URL Tools
 ==================
 
-This is a set of simle tools for dealing with the list in image URLs you can 
+This is a set of tools for dealing with the list in image URLs you can 
 down loadload from ImageNet at http://image-net.org/download 
 
 Presently there are three Python scripts:
 
 - fetch_urls.py  Reads a file containing the synsets you want to download 
 images for.  If all you want are dogs then place one line of text in this file that 
-reads "dog.n.01".  If you need images for 1000 clases then place 1000 lines
+reads "dog.n.01".  If you need images for 1000 classes then place 1000 lines
 in this file, one for each class.  Note that you can use the synset "dog.n.01" 
 or the WordNetID "n00003456" in the file.  This script treats them 
 interchanably. 
@@ -56,13 +56,39 @@ to mean the 345th jpg image file of the synset at offset 5432.
 If all goes right you can cut and past this url into a web browes and see
 the image.
 
+Image Quality Control
+-------------
+As I use this software to download images I keep finding issues with the images.
+Each tie I find a class of problems I implement an autometed quailty
+control.  This is a mostly complete list of them:
+
+- URL must have a file extension (of the allowed type) either on the path
+parameters or querry part
+
+- after the file is downloaded we look at "magic" signature bytes inside 
+the binary data to varify the downloaed file is of type associated with
+the extension in the URL.   Many times this is not the case, especially
+when a web site displays a cartoon picture saying "the file is not here"
+
+In the future I'm thinkong about adding some more checks
+
+- Actaully read the file and verify it is a color image that is at least
+some minimum size
+
+- compute a color histogram and check for reasonablness.  For example the
+image is likely not good if 90% of the histogram bins are zero.
+
+
 fetch_urls.py
 -------------
 
 Use this when you are ready to download the images.  Place the list of 
 synsets you want
 in a file and only those will be downloaded.   The JPG files are placed
-in a directory you speciy on the command line.   If fetch_urls.py is 
+in sub-directories of the directory you speciy on the command line,
+one sub-directlry for each synset.  (This is the directory structure expected by
+the Keras' image processing routine) 
+If fetch_urls.py is 
 interrupted and restarted it will NOT re-download any JPG images it finds 
 in the image directory. So you can run this perhaps every night and stop 
 and restart it if you need to use free up bandwidth.
