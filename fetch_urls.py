@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from nltk.corpus import wordnet as wn
-import urllib
+from urllib.parse import urlparse
 import urllib.request
 import re
 from pathlib import Path
@@ -32,6 +32,29 @@ n00005787_119   http://farm4.static.flickr.com/3202/2960028736_74d31b947d.jpg
 #   serial = 86
 #   url = 'http://img.99118.com/Big2/1024768/20101211/1700013.jpg'
 
+
+
+def check_magic(buffer):
+
+    extension = '' # return a zero length string on wrong file type
+
+    # Macic numbers at offset=0 for the short list of files we accept.
+    # for more robut checking of more file type we could use "libmagic"
+    #
+    # LIst of ( filename extension, magic bytes at offset zero)
+    filesigs = [('jpg', b'\xFF\xD8\xFF'),
+                ('png', b'\x89\x50\x4E\x47'),
+                ('gif', b'\x47\x49\x46\x38\x37\x61'),  # gif87a
+                ('gif', b'\x47\x49\x46\x38\x39\x61')]  # gif89a
+
+    for (ex, sig) in filesigs:
+        if buffer.startswith(sig):
+            extension = ex
+            break
+    return extension
+
+
+
 synsets = {}
 
 def _main(args):
@@ -51,6 +74,14 @@ def _main(args):
     # The software below figures out which form is used inthe files (forms can be mixed
     # withion a file)
     #
+
+    # Dictionary of acceptable image file extensions and what we will use as
+    # the extension when we save the file locally
+    file_ext_whitelist = {'jpg': 'jpg', 'png': 'png', 'jpeg': 'jpg',
+                          'JPG': 'jpg', 'PNG': 'png', 'JPEG': 'jpg'}
+    file_ext_gif       = {'gif': 'gif', 'GIF': 'gif'}
+
+
     synsetdict = {}
     lines = 0
     shoppinglist_file = open(args.shopping_file, 'r',   encoding="utf-8")
@@ -79,7 +110,8 @@ def _main(args):
             print('ERROR shoppinglist.txt, line', lines, 'unrecognised format', line)
             exit()
 
-    print('Processing URLs from the following shopping list', synsetdict)
+    if args.verbose:
+        print('INFO: Processing URLs from the following shopping list', synsetdict)
 
     # Make sure we have a directory for every synset, these may alreadys exist or not
     for offset in synsetdict:
@@ -87,6 +119,12 @@ def _main(args):
         path = args.image_dir + ssstr
         if not os.path.exists(path):
             os.makedirs(path)
+
+    # if we are going to allow GIF files, append to the whitelist
+    if args.gif_ok:
+        file_ext_whitelist.update(file_ext_gif)
+        if args.verbose:
+            print('INFO: allowing gif files')
 
     # read the URL list file end to end and process only those lines that
     # match synsets in our shopping list
@@ -117,40 +155,84 @@ def _main(args):
         if offset not in synsetdict:
             continue
 
+        # Attempt to find the file extension.  If we can't find it skip the URL
+        # if we do find it, normalise the extension to lower case and three characters
+        urlparts = urlparse(url)
+        urlpath  = urlparts.path
+
+        try:
+            _f, urlextension = urlpath.rsplit(sep='.', maxsplit=1)
+        except (ValueError):
+            print('WARNING No file extension, URL skiped:', line)
+            continue
+
+        if urlextension not in file_ext_whitelist:
+
+            # did not find filename extension in path, perhaps it is a parameter
+            for ext in file_ext_whitelist:
+                dotext = '.' + ext
+                if (dotext in urlparts.params) or (dotext in urlparts.query):
+                    file_extension = file_ext_whitelist[ext]
+                    break
+                else:
+                    file_extension = ''
+                    print('WARNING No file extension found, URL skiped:', line)
+                    break
+            if '' == file_extension:
+                continue
+
+        else:
+            file_extension = file_ext_whitelist[urlextension]
+
+
         # Have we already downloaded this URL?  Don't waste time doing it again.
         if url not in urldict:
             urldict[url] = line
         else:
             dup_count += 1
             print('WARNING DUPLICATE URL this jpg file will NOT be downloaded again:')
-            print('   ', urldict[url_norm])
+            print('   ', urldict[url])
             print('   ', line)
             continue
 
         # create the file name
-        jpg_filename = args.image_dir + ssstr + '/' + ssstr + '-' + serial + '.jpg'
+        image_filename = args.image_dir + ssstr + '/' + ssstr + '-' + serial + '.' + file_extension
 
         # If we already have this file, we don't need to get it
-        if Path(jpg_filename).is_file():
+        if Path(image_filename).is_file():
             files_existing += 1
+            if args.verbose:
+                print('INFO: File exists, not downloaing again', image_filename)
             continue
 
         try:
             response = urllib.request.urlopen(url)
             imagedata = response.read()
-            newfile = open(jpg_filename, 'wb')
-            newfile.write(imagedata)
-            newfile.close()
-            files_downloaded += 1
-
-            # Crude progress bar
-            print('.', end='')
 
         except urllib.error.URLError as e:
-            print(e.reason, wnid, ssstr, ' at line', lines_read)
+            print(e.reason, wnid, ssstr, ' at line', lines_read, url)
+            continue
         except:
-            print('unknown error at line', lines_read)
+            print('WARNING unknown error while downloading data at line', lines_read, url)
+            continue
 
+        ext_by_magic = check_magic(imagedata)
+        if ext_by_magic not in file_ext_whitelist:
+            print('WARNING Downloaded file signature is wrong, not saved', line)
+            continue
+        if ext_by_magic != file_extension:
+            print("WARNING Downloaded file signature", ext_by_magic, "does not match URL", line)
+            continue
+
+        newfile = open(image_filename, 'wb')
+        newfile.write(imagedata)
+        newfile.close()
+        files_downloaded += 1
+
+        # Crude progress bar
+        print('.', end='')
+
+    # after loop end, print a summary of what was done then exit
     print('downloaded', files_downloaded,
           'skipped', files_existing, 'existing files',
           'did not download', dup_count, 'duplicate URLs')
@@ -179,9 +261,19 @@ if __name__ == '__main__':
                         help='file containing a list of synsets to be processed',
                         required=True)
 
+    parser.add_argument('-g', '--gif_ok',
+                        action='store_true',
+                        help='if specified .gif files are allowed')
+
     parser.add_argument('-d', '--dryrun',
                         action='store_true',
                         help='if specified no attemptis made to download image files')
+
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        help='print lots of information about each URL in requested synsets')
+
+    args = parser.parse_args()
 
     args = parser.parse_args()
 
